@@ -1,4 +1,4 @@
-# Avoidance-Prevents-Immune-Activation
+# Antigen-Avoidance-Prevents-Immune-Activation
 RNA-Seq Analysis - Antigen avoidance prevents Mastcell-mediated immune activation and inflammation
 
 To replicate the the downstream RNA-Seq data analysis, raw countmatrices must be downloaded from the Gene Expresseion Omnibus (SuperSeries ID: GSE225054). Metadata are included in this repository.
