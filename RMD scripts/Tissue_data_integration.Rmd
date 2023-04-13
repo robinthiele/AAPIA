@@ -1,0 +1,153 @@
+---
+title: "RNA-Seq Analysis Code Availability of "Mast cells link immune sensing to antigen avoidance behavior" by Plum et al 2023"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Data description and Input
+
+**genotypes:**
+
+* Cpa3Cre KO | wt
+  
+**timepoints:**
+
+* day 0 
+* day 7
+* day 11 
+* day 16
+  
+**OVA delivery:**
+
+* naive (to OVA)
+* immunized (but never challenged)
+* oral_gavage (short: OG)
+* 2-bottle_test (short: 2BT)
+
+**Comparisions of interest:**
+
+* wildtype groups with different OVA deliveries (OG versus 2BT) by day
+* 2-bottle test groups with different genotypes (Cpa3Cre^Cre/+^ versus Cpa3^+/+^) by day
+* time-wise comparision
+
+# Data processing pipeline
+
+Libraries were prepared via Illumina TrueSeq Stranded Kit, sequenced via NextSeq2000 P2, aligned via STAR aligner (v.2.5.2b) and counted via FeatureCount (Alignment and Annotation to ENSEMBL:Mus_musculus_GRCm38_102).
+  
+# Additional Packages
+```{r , warning=F, message=F}
+# general
+library(dplyr)
+library(readxl)
+
+# data visualization
+library(ComplexHeatmap)
+```
+
+# Data 
+Data are available under Gene Expression Omnibus No. : GSE225054. This GSE ID contains a SuperSeries of two datasets. The first dataset comprises small intestine samples (GSE224895). The second dataset comprises samples derived from stomach (GSE225053). Raw Countmatrices can be retrieved via these GSE IDs.
+
+Further metadata are included in this repository.
+```{r pressure, echo=FALSE}
+dir.intestine <- "path-to-intestine-DEA-data"  
+dir.stomach <- "path-to-stomach-DEA-data" 
+
+## get all DEA data
+DEA_SI <- readRDS( paste(dir.intestine,".RData", sep ="/")) # derive from "Tissue_specific_RNA-Seq_Analysis.Rmd"
+DEA_ST <- readRDS( paste(dir.stomach,".RData", sep ="/")) # derive from "Tissue_specific_RNA-Seq_Analysis.Rmd"
+
+DEA_SI$tissue <- rep("intestine", length(DEA_SI$ensembl_gene_id))
+DEA_ST$tissue <- rep("stomach", length(DEA_ST$ensembl_gene_id))
+
+```
+
+## data integration
+```{r}
+DEA_all <- rbind(DEA_SI, DEA_ST)
+DEA_all <- subset(DEA_all, grepl("WT",DEA_all$comparision) & grepl("day7",DEA_all$timepoint) )
+
+
+## get curated/manually annotated data # included in metadata in this repository
+DEA_SI <- read_xlsx( paste(dir.intestine,"processed data/DEA_lfc_3_manual_anno_SI.xlsx", sep ="/"))
+DEA_ST <- read_xlsx( paste(dir.stomach,"processed data/DEA_lfc_3_manual_anno_Stomach.xlsx", sep ="/"))
+
+DEA_SI$tissue <- rep("intestine", length(DEA_SI$ensembl_gene_id))
+DEA_ST$tissue <- rep("stomach", length(DEA_ST$ensembl_gene_id))
+
+DEA <- rbind(DEA_SI, DEA_ST)
+DEA <- subset(DEA, grepl("WT",DEA$comparision) & grepl("day7",DEA$timepoint) )
+
+## select genes of interest (in this case significant genes)
+GOI <- unique(subset(DEA, DEA$padj < 0.05)$mgi_symbol)
+
+DEA_GOI <- subset(DEA_all, DEA_all$mgi_symbol %in% GOI)[,-14]
+DEA_GOI <- DEA_GOI[!duplicated(DEA_GOI), ]
+DEA_GOI <- left_join(DEA_GOI, DEA[,c(1,17)], by = "ensembl_gene_id")
+DEA_GOI <- DEA_GOI[!duplicated(DEA_GOI), ]
+# if gene is not significant in respective comparision set to NA
+DEA_GOI$log2FoldChange <- ifelse((DEA_GOI$padj > 0.05 | is.na(DEA_GOI$padj)), NA, DEA_GOI$log2FoldChange)
+
+### heatmaps with lfc
+DEA_lfc <- DEA_GOI[,c( "mgi_symbol", "comparision","log2FoldChange","Group (manual annotation)","tissue")]
+
+DEA_lfc <- DEA_lfc[!duplicated(DEA_lfc), ]
+DEA_lfc <- DEA_lfc[DEA_lfc$mgi_symbol != "",]
+DEA_lfc <- DEA_lfc[!is.na(DEA_lfc$mgi_symbol),]
+
+DEA_lfc$comparision <- paste(DEA_lfc$comparision,DEA_lfc$tissue, sep ="_")
+DEA_lfc <- DEA_lfc[,-c(4,5)]
+DEA_lfc <- as.data.frame(tidyr::pivot_wider(DEA_lfc,  id_cols = 1, names_from = comparision, values_from = log2FoldChange))
+
+rownames(DEA_lfc) <- DEA_lfc$mgi_symbol
+DEA_lfc <- as.matrix(DEA_lfc[-1])
+DEA_lfc[is.na(DEA_lfc)] <- -1
+```
+
+# Plot Heatmap - partial **main figure 3**
+```{r}
+paletteLength <- 1000
+heatmaps.GOI <- function(select){ 
+  
+  plot.data <- DEA_lfc
+  plot.data <- plot.data[,c(4,3,2,1)] # change order of comparisions
+  
+  DEA_short <- DEA_GOI[,c(7,15)]
+  DEA_short  <- DEA_short [!duplicated(DEA_short ), ]
+  plot.df <- data.frame(Group = DEA_short$`Group (manual annotation)`)
+  rownames(plot.df) <- DEA_short$mgi_symbol
+  
+   ann_colors = list(Group= c("Mast cell gene"="steelblue4", 
+                              "Immune response"="firebrick",
+                              "Antimicrobial immunity"="darkorange",
+                              "Tissue remodeling"="darkorchid",
+                              "undefined" ="darkgrey"))
+   
+   color <- colorRampPalette(c("white", "white" ,"darkorange2","firebrick1","firebrick4"))(paletteLength )
+
+    
+    plot.data <- plot.data[rownames(plot.df),]
+    
+      myBreaks <- c(seq(min(plot.data), 0, length.out=ceiling(paletteLength/2) + 1), 
+             seq(max(plot.data)/paletteLength, max(plot.data), length.out=floor(paletteLength/2)))
+
+
+  x <- ComplexHeatmap::pheatmap(plot.data, cluster_rows=T, show_rownames=T,
+                          cluster_cols=F, annotation_row=plot.df, 
+                          color = color, annotation_colors = ann_colors,
+                          row_split = plot.df, 
+                          breaks = myBreaks) 
+  return(x)
+
+} # heatmap wrapper function
+
+
+## pdf(paste(dir.plots, ".pdf", sep = "/"), width = 4.25, height = 12) ##
+heatmaps.GOI()
+## dev.off() ##
+
+```

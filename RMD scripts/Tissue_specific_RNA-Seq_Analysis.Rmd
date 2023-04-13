@@ -1,0 +1,812 @@
+---
+title: "RNA-Seq Analysis Code Availability of "Mast cells link immune sensing to antigen avoidance behavior" by Plum et al 2023"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Data description and Input
+
+**genotypes:**
+
+* Cpa3^Cre/+^ (KO)
+* Cpa3^+/+^ (WT)
+  
+**timepoints:**
+
+* day 0 
+* day 7
+* day 11 
+* day 16
+  
+**OVA delivery:**
+
+* naive (to OVA)
+* immunized (but never challenged)
+* oral_gavage (short: OG)
+* 2-bottle_test (short: 2BT)
+
+**Comparisions of interest:**
+
+* wildtype groups with different OVA deliveries (OG versus 2BT) by day
+* 2-bottle test groups with different genotypes (Cpa3Cre^Cre/+^ versus Cpa3^+/+^) by day
+* time-wise comparision
+
+# Data processing pipeline
+
+Libraries were prepared via Illumina TrueSeq Stranded Kit, sequenced via NextSeq2000 P2 100bp PE, aligned via STAR aligner (v.2.5.2b) and counted via FeatureCount (Alignment and Annotation to ENSEMBL:Mus_musculus_GRCm38_102).
+  
+# Additional Packages
+```{r , warning=F, message=F}
+# general
+library(readxl)
+library(writexl)
+library(dplyr)
+library(tidyr)
+library(scales)
+
+# DEA
+library(DESeq2)
+library(apeglm)
+
+# PCA
+library(ordr)
+
+# GSEA
+library(clusterProfiler)
+
+# gene annotation / data bases
+library(biomaRt)
+library(org.Mm.eg.db)
+library(msigdbr)
+
+# statistics
+library(ggpubr)
+
+# data visualization
+library(ggplot2)
+library(ggrepel)
+library(ggrepel)
+library(ggbeeswarm)
+
+```
+
+# Data 
+Data are available under Gene Expression Omnibus No. : GSE225054. This GSE ID contains a SuperSeries of two datasets. The first dataset comprises small intestine samples (GSE224895). The second dataset comprises samples derived from stomach (GSE225053). Raw Countmatrices can be retrieved via these GSE IDs.
+
+Further metadata are included in this repository.
+
+The code is interchangeable for both datasets.
+
+```{r , warning=F, message=F}
+tissue <- "" # type: "intestine" or "stomach"
+
+dir.path <- "path-to-directory/" # path to data directory
+
+# load countmatrix (raw)
+countmatrix <- read.table(paste(dir.path, "GSE225053_OVA-avoidance_",tissue,"_raw_counts.txt", sep =""), header = T, sep = ";") 
+colnames(countmatrix) <- gsub("\\.","-",colnames(countmatrix)) # replace "." by "-" if applicable
+
+# load metadata sheet
+metadata <- read.table(paste(dir.path,"metadata/metadata_",tissue,".csv", sep =""), sep =";" ) 
+
+```
+
+## Prepare data for DEA via DESeq2
+```{r , warning=F}
+coldata <-  metadata # make coldata from metadata
+rownames(coldata) <- metadata$Seq_ID # change labels to rownames
+coldata <- coldata[order(rownames(coldata)),] # order
+
+rownames(countmatrix) <- countmatrix[,1] # change Genes from col to rownames
+countmatrix <- countmatrix[,-1] # cut ENSEMBL IDs as column
+```
+
+
+### split/simplify by d7-d11-d16-naive
+```{r, warning=F, message=F}
+day_split_wrapper <- function(){
+
+### d7 ########################################################################################
+## KO
+# 2-BT 
+coldata_7_KO_2BT <- subset(coldata,coldata$day  %in% c("d0","d7") & coldata$Cpa3Cre == "KO" & 
+                          coldata$OVA_delivery %in% c("imm","2-BT"))
+countmatrix_7_KO_2BT <- countmatrix[,coldata_7_KO_2BT$Seq_ID]
+# OG
+coldata_7_KO_OG <- subset(coldata,coldata$day  %in% c("d0","d7") & coldata$Cpa3Cre == "KO" & 
+                          coldata$OVA_delivery %in% c("imm","Gavage"))
+countmatrix_7_KO_OG <- countmatrix[,coldata_7_KO_OG$Seq_ID]
+
+## WT
+# 2-BT
+coldata_7_WT_2BT <- subset(coldata,coldata$day  %in% c("d0","d7") & coldata$Cpa3Cre == "wt" & 
+                          coldata$OVA_delivery %in% c("imm","2-BT"))
+countmatrix_7_WT_2BT <- countmatrix[,coldata_7_WT_2BT$Seq_ID]
+# OG
+coldata_7_WT_OG <- subset(coldata,coldata$day  %in% c("d0","d7") & coldata$Cpa3Cre == "wt" & 
+                          coldata$OVA_delivery %in% c("imm","Gavage"))
+countmatrix_7_WT_OG <- countmatrix[,coldata_7_WT_OG$Seq_ID]
+
+### d11 ########################################################################################
+## KO
+# 2-BT 
+coldata_11_KO_2BT <- subset(coldata,coldata$day  %in% c("d0","d11") & coldata$Cpa3Cre == "KO" & 
+                          coldata$OVA_delivery %in% c("imm","2-BT"))
+countmatrix_11_KO_2BT <- countmatrix[,coldata_11_KO_2BT$Seq_ID]
+# OG
+coldata_11_KO_OG <- subset(coldata,coldata$day  %in% c("d0","d11") & coldata$Cpa3Cre == "KO" & 
+                          coldata$OVA_delivery %in% c("imm","Gavage"))
+countmatrix_11_KO_OG <- countmatrix[,coldata_11_KO_OG$Seq_ID]
+
+## WT
+# 2-BT
+coldata_11_WT_2BT <- subset(coldata,coldata$day  %in% c("d0","d11") & coldata$Cpa3Cre == "wt" & 
+                          coldata$OVA_delivery %in% c("imm","2-BT"))
+countmatrix_11_WT_2BT <- countmatrix[,coldata_11_WT_2BT$Seq_ID]
+# OG
+coldata_11_WT_OG <- subset(coldata,coldata$day  %in% c("d0","d11") & coldata$Cpa3Cre == "wt" & 
+                          coldata$OVA_delivery %in% c("imm","Gavage"))
+countmatrix_11_WT_OG <- countmatrix[,coldata_11_WT_OG$Seq_ID]
+
+
+### d16 ########################################################################################
+## KO
+# 2-BT 
+coldata_16_KO_2BT <- subset(coldata,coldata$day  %in% c("d0","d16") & coldata$Cpa3Cre == "KO" & 
+                          coldata$OVA_delivery %in% c("imm","2-BT"))
+countmatrix_16_KO_2BT <- countmatrix[,coldata_16_KO_2BT$Seq_ID]
+# OG
+coldata_16_KO_OG <- subset(coldata,coldata$day  %in% c("d0","d16") & coldata$Cpa3Cre == "KO" & 
+                          coldata$OVA_delivery %in% c("imm","Gavage"))
+countmatrix_16_KO_OG <- countmatrix[,coldata_16_KO_OG$Seq_ID]
+
+## WT
+# 2-BT
+coldata_16_WT_2BT <- subset(coldata,coldata$day  %in% c("d0","d16") & coldata$Cpa3Cre == "wt" & 
+                          coldata$OVA_delivery %in% c("imm","2-BT"))
+countmatrix_16_WT_2BT <- countmatrix[,coldata_16_WT_2BT$Seq_ID]
+# OG
+coldata_16_WT_OG <- subset(coldata,coldata$day  %in% c("d0","d16") & coldata$Cpa3Cre == "wt" & 
+                          coldata$OVA_delivery %in% c("imm","Gavage"))
+countmatrix_16_WT_OG <- countmatrix[,coldata_16_WT_OG$Seq_ID]
+
+
+#################################################################################################
+
+day_split <- list("d7_WT_2BT" = list(countmatrix_7_WT_2BT, coldata_7_WT_2BT),
+                  "d7_WT_OG"=list(countmatrix_7_WT_OG, coldata_7_WT_OG),
+                  "d7_KO_2BT" = list(countmatrix_7_KO_2BT, coldata_7_KO_2BT),
+                  "d7_KO_OG" = list(countmatrix_7_KO_OG, coldata_7_KO_OG),
+                  "d11_WT_2BT" = list(countmatrix_11_WT_2BT, coldata_11_WT_2BT),
+                  "d11_WT_OG"= list(countmatrix_11_WT_OG, coldata_11_WT_OG),
+                  "d11_KO_2BT" = list(countmatrix_11_KO_2BT, coldata_11_KO_2BT),
+                  "d11_KO_OG" = list(countmatrix_11_KO_OG, coldata_11_KO_OG),
+                  "d16_WT_2BT" = list(countmatrix_16_WT_2BT, coldata_16_WT_2BT),
+                  "d16_WT_OG"=list(countmatrix_16_WT_OG, coldata_16_WT_OG),
+                  "d16_KO_2BT" = list(countmatrix_16_KO_2BT, coldata_16_KO_2BT),
+                  "d16_KO_OG" = list(countmatrix_16_KO_OG, coldata_16_KO_OG)
+                  )
+return(day_split)
+}
+
+day_split <- day_split_wrapper()
+```
+
+
+## Create DESeqDataSet (dds) object and perform DEA
+
+The output is a dds object holding all the information for DESeq2 specific analysis plus individual anaylsis of the above stated comparisions. P-values are adjusted via *Benjamini Hochberg* as the default. Log2FoldChanges are shrunken towards zero via the *apeglm* algorithm.
+```{r warning = F, message=F}
+### DEseq wrapper function to process day 7, 11, 16
+DESeq_eval_day <- function(comparision) {
+  
+data <- day_split[[comparision]]
+  
+countmatrix <- data[[1]]
+coldata <- data[[2]]
+
+## create dds object
+dds <- DESeqDataSetFromMatrix(countData = countmatrix,
+                              colData = coldata,
+                              design = ~ OVA_delivery
+                              )
+
+# DESeq2 does not like to deal with zero counts, so filter all genes that have no count or only one count throughout all samples
+keep <- rowSums(counts(dds)) > 1 
+dds <- dds[keep,]
+
+# set references
+if(grepl("2BT_OG", comparision)) {dds$OVA_delivery <- relevel(dds$OVA_delivery, ref = "2-BT")
+} else {dds$OVA_delivery <- relevel(dds$OVA_delivery, ref = "imm")}
+
+### multifactor design 
+dds <- estimateSizeFactors(dds)
+
+# !at least 5 counts in 5 samples! <- relatively harsh pre-filtering
+idx <- rowSums(counts(dds, normalized=TRUE) >=  2) >= 5 
+dds <- dds[idx,]
+
+
+## DEA 
+dds <- DESeq(dds)
+
+# DE of Cpa3Cre +/+ vs Cpa3Cre +/d
+DEA <- as.data.frame(lfcShrink(dds, coef = resultsNames(dds)[2], type = "apeglm")) 
+
+return(DEA)
+}
+
+## DESeq wrapper to process naive
+
+## DESeq wrapper to retrieve all data for downstream analysis
+DESeq_all_samples <- function() {
+
+## create dds object
+dds <- DESeqDataSetFromMatrix(countData = countmatrix,
+                              colData = coldata,
+                              design = ~ OVA_delivery
+                              )
+
+keep <- rowSums(counts(dds)) > 1 
+dds <- dds[keep,]
+dds <- estimateSizeFactors(dds)
+idx <- rowSums(counts(dds, normalized=TRUE) >=  2) >= 5
+dds <- dds[idx,]
+counts <- counts(dds)
+
+dds <<- DESeq(dds) ## assign dds globally for PC analysis
+
+return(counts)
+}
+
+## retrieve "counts" for all samples
+counts <- DESeq_all_samples()
+
+DEA <- lapply(names(day_split), DESeq_eval_day)
+names(DEA) <- names(day_split)
+
+DEA <- lapply(DEA , function(x){data.frame(row = rownames(x),x)})
+
+```
+
+
+### Optional saving DEA output
+```{r, warning=F, message=F}
+### save as RData/rds object
+
+## saveRDS(DEA, paste(dir.path,".RData", sep ="/")) ##
+## saveRDS(dds, paste(dir.path,".RData", sep ="/")) ##
+
+```
+
+
+### Generic downstream analysis 
+## Principal component analysis  
+```{r, warning=F}
+# variant stabilizing transformation
+vsd <- vst(dds, blind=FALSE) 
+
+rv <- rowVars(assay(vsd))
+select <- order(rv, decreasing = TRUE)[seq_len(min(1000, length(rv)))] # select top 1000 variant genes
+
+vst <- as.data.frame(t(assay(vsd)[select, ])) # transpose DF
+vst$Seq_ID <- rownames(vst) # prepare for metadata joining
+vst <- left_join(vst, coldata[,1:6]) # add metadata to PCA vst DF
+
+vst$day <- ifelse(vst$day %in% c("naive", "d0"), "d0", vst$day) # naive and day 0 are both considered day 0
+vst$day <- factor(vst$day, levels = c("d0","d7","d11","d16")) # factorize
+vst$Cpa3Cre <- factor(vst$Cpa3Cre, levels = c("wt","KO")) # factorize
+
+########## PCA for 500 most variable genes ######################################################################################
+pca <- ordinate(vst, cols = 1:500, model = ~ prcomp(., scale. = TRUE)) # compute PC`s
+print(pca)
+```
+
+## Scree plot of PC contribution
+```{r, warning=F, message=F}
+## pdf(paste(dir.path, ".pdf", sep = "/"), width = 8, height = 4) ##
+
+ggbiplot::ggscreeplot(pca) + theme_minimal() 
+
+## dev.off() ##
+```
+
+## PCA dot plots of PC1 and PC2 **Extended data Figure 5**
+```{r, warning=F, message=F}
+## pdf(paste(dir.path, ".pdf", sep = "/"), width = 8, height = 4) ##
+ggbiplot(pca, aes(x=PC1, y=PC2)) + # dotplot with PC1 and PC2 
+  geom_rows_point(aes(color = OVA_delivery)) +
+  stat_rows_ellipse(aes(color = OVA_delivery), alpha = .5) + # ellipses around groups (= OVA delivery type)
+  scale_color_manual(
+    values = c("imm"="slategrey", "untreated" = "lightblue2","2-BT" ="darkorange2","Gavage" ="firebrick"))+
+  facet_grid(.~Cpa3Cre)+
+  theme_minimal()+
+  ggtitle("Top 500 variant genes, PC1 + PC2")
+
+## dev.off() ##
+```
+
+# Gene set enrichment Analysis (GSEA):
+## msigdb signatures of interest:
+```{r, warning=F, message=F}
+## msigdb Hallmark signatures
+signatures_H <- msigdbr(species = "Mus musculus", category = "H")
+hallmark_inflammatory <- subset(signatures_H, signatures_H$gs_name == "HALLMARK_INFLAMMATORY_RESPONSE" )
+
+## manual (self-) curated mast cell markers:
+Mast_cell_marker <- c("Cpa3","Mcpt1","Mcpt2","Mcpt9","Mcpt4","Fcer1a","Tpsb2","Tpsab1","Mcpt-ps1","Cma1","Cd200r3","Tph1","Srgn","Lilrb4b","Ms4a2","Hs3st1")
+
+```
+
+## mgi_name & entrez_id annotation
+```{r, warning=F, message=F}
+mm10 = useMart("ensembl", dataset = "mmusculus_gene_ensembl") # mm10 genome import exact version: GRCm38.p6 retrieve via:ensembl=useMart(ensembl) & listDatasets(ensembl)
+
+# annotate mgi and entrez symbol,this will produces duplicated rows!
+get_mgi <- function(DE){
+    
+    DE <- as.data.frame(DE)
+    colnames(DE)[1] <- "ensembl_gene_id"
+    mm.gene <- getBM(attributes = c("ensembl_gene_id", "mgi_symbol", "entrezgene_id"), 
+                  values = DE$ensembl_gene_id, filters= "ensembl_gene_id" ,mart = mm10)
+    DE <- left_join(DE, mm.gene, by = "ensembl_gene_id")
+    return(DE)
+} # mgi symbol wrapper function
+
+DEA <- lapply(DEA, get_mgi)
+#saveRDS(DEA, paste(dir.path,"RData/DEA_mgi.RData", sep ="/"))
+#DEA <- readRDS(paste(dir.path,"RData/DEA_mgi.RData", sep ="/"))
+```
+
+## Computation - GSEA
+```{r, warning=F, message=F}
+### gene ranking based on (apeglm shrunken!) Log2FC 
+get_ranked_genes <- function(DEA){
+
+  geneList <- DEA
+  genelist <- geneList[,c("entrezgene_id","log2FoldChange")]
+  
+  ## feature 1: numeric vector  
+  geneList <- genelist[,2]
+   
+  ## feature 2: named vector  
+  names(geneList) <- as.character(genelist[,1])
+  
+  ## feature 3: decreasing order
+ geneList <- sort(geneList, decreasing = TRUE)
+ return(geneList)
+ }
+geneList <- lapply(DEA, get_ranked_genes)
+
+### ClusterProfiler, msigDbr #####
+### gene set enrichment analysis of GO-biologic processes
+## get GSEAs terms
+get_GSEA_GO <- function(geneList){
+  
+GO <- gseGO(geneList, OrgDb = org.Mm.eg.db, ont = "BP", maxGSSize = 100) 
+# ont --> biological processes, maxGSize --> default
+
+return(GO)
+}
+
+GSEAs <- lapply(geneList, get_GSEA_GO)
+
+## save data ##
+
+#saveRDS(GSEAs, paste(dir.path, "RData/GSEAs.RData", sep = "/"))
+#GSEAs <- readRDS(paste(dir.path, "RData/GSEAs.RData", sep = "/"))
+
+## save data ##
+
+```
+
+# GO-term Analysis
+## GSEA enrichment map showing top x terms (defined with "showCategory = x") as clusters:
+```{r, warning=F, message=F}
+## show top 25 GO terms
+
+## pdf(paste(dir.path, "plots/GSEA/GO_enrichment_map_top100_terms.pdf", sep = "/"), width = 25, height = 25) ##
+set.seed(1)
+lapply(names(GSEAs), function(x){ 
+  data <- GSEAs[[x]]
+  # similarity calculation, default "Jaccard similarity coeffient"
+  data <- enrichplot::pairwise_termsim(data) 
+  emapplot(data, showCategory = 50, cex_label_category = 0.3) +
+    ggtitle(x)
+  })
+## dev.off() ##
+```
+
+## GO terms further processing and manual curation
+```{r, warning=F, message=F}
+# basic shaping, add name of comparision, add ENTREZ ID if applicable, simplify GO terms --> drop similar pathways
+forge_GO <- function(GSEA_names, simple){
+  
+  GO <- lapply(GSEA_names, function(x) {
+    GSEA <- GSEAs[[x]]
+    if(isTRUE(simple)){ GSEA <- simplify(GSEA)} # increase readability
+    GSEA <- setReadable(GSEA, 'org.Mm.eg.db', 'ENTREZID')
+    GSEA <- as.data.frame(GSEA)
+    GSEA$comparision <- rep(x, length(GSEA$ID)) 
+    return(GSEA)
+    })
+  
+  return(do.call(rbind, GO)) # forge in onw DF
+}
+GO <- forge_GO(names(GSEAs), F)
+
+### add meta info to GO terms for
+GO$timepoint <- ifelse(grepl("d7",GO$comparision), "day7",ifelse(grepl("d11",GO$comparision),"day11","day16"))
+GO$timepoint <- factor(GO$timepoint, levels =c("day7","day11","day16"))
+GO$Genotype <- ifelse(grepl("WT",GO$comparision), "WT","KO")
+GO$Genotype <- factor(GO$Genotype, levels = c("WT","KO"))
+GO$OVA_delivery <- ifelse(grepl("OG",GO$comparision), "OG","2BT")
+GO$Geno_treatment <- paste(GO$Genotype,GO$OVA_delivery, sep = "_")
+GO$Geno_treatment <- factor(GO$Geno_treatment, levels = c("WT_2BT","KO_2BT","KO_OG","WT_OG"))
+
+### select immune system relevant GO terms by keyword search
+## immune category 
+GO$main_cat <- ifelse(grepl(c("immun|leuko|T cell|B cell|cytokine|inflamma|defense|chemotaxis|bacter|interleuk|chemokine|humoral|hemopo|interferon|lympocyte|pyroptosis|macrophage|integrin|phagocytosis|mast|mononuclear"),GO$Description),"immune response","else")
+                                    
+
+## immune subcategories
+mucosal_immunity <- c("tissue specific immun|mucosal immune|antibacterial humoral|antimicrobial humoral|response to Gram")
+chemotaxis <- c("eosinophil migration|macrophage migration|lymphocte migration|mononuclear cell migration|monocyte migration|neutrophil mediated|humoral immune response|chemotaxis|chemokine|macrophage activ|T cell migration")
+
+innate <- c("phagocytosis|leukocyte apoptotic|myeloid leukocyte mediat|myleoid leukocyte act|cytokine|interleukin|interferon|leukotriene|integrin|neutrophil")
+Mast_cell_immunity <- c("mast|secretory pathway|leukocyte degran|myeloid leukocyte mediated degran|myeloid cell activation")
+adaptive_immunity <- c("T-helper|T cell|type 2 immune|CD4|17 type|T-helper|adaptive immune|immunglobulin|antigen processing|B cell")
+
+GO$immune_cat <- ifelse(grepl(Mast_cell_immunity, GO$Description), "Mast immunity",
+                 ifelse(grepl(chemotaxis, GO$Description), "chemotaxis and cell migration",
+                 ifelse(grepl(mucosal_immunity, GO$Description),"Mucosal immunity",
+                 ifelse(grepl(innate, GO$Description), "Innate immunity",
+                 ifelse(grepl(adaptive_immunity, GO$Description), "Adaptive immunity", 
+                        "not categorized"
+                                    )))))
+
+```
+
+# Data curation
+## GO term list **Extended data table 1**
+```{r, warning=F, message=F}
+## extended data table 1 ##
+GO_excel <- GO
+GO_excel$Genotype <- ifelse(GO_excel$Genotype == "WT", "Cpa3+/+", "Cpa3Cre/+")
+GO_excel$OVA_delivery <- ifelse(GO_excel$OVA_delivery == "OG", "oral_gavage", "2-bottle_test")
+GO_excel$comparision <- paste(rep("immunized",length(GO_excel$ID)),GO_excel$timepoint, GO_excel$Genotype, GO_excel$OVA_delivery, sep = "_" )
+colnames(GO_excel)[12] <- "tested_sample"
+GO_excel$reference_sample <- rep("immunized_water_drinking",length(GO_excel$ID))
+GO_excel <- GO_excel[,c(1:11,19,12,18)]
+
+GO_excel <- split(subset(GO_excel, GO_excel$immune_cat != "not categorized"), 
+                  subset(GO_excel, GO_excel$immune_cat != "not categorized")$immune_cat )
+GO_excel <- lapply(GO_excel, function(x){ x[,1:13]
+                                          x$tissue <- rep(tissue,length(x$ID))
+                                          return(x)})
+
+
+## write_xlsx(GO_excel, paste(dir.path, "processed data/GO_terms_publication_rdy.xlsx", sep = "/")) ##
+
+## saveRDS(GO, paste(dir.path, "RData/GO_terms.RData", sep = "/")) ##
+## GO <- readRDS(paste(dir.path, "RData/GO_terms.RData", sep = "/")) ##
+```
+
+## retrieve "core enrichment" genes form significant GO terms from immune subcategories
+```{r, warning=F, message=F}
+GO_immune <- split(GO, GO$immune_cat)[-6]
+
+get_edge_genes <- function(x){
+            Core_enrichment_immune <- paste0(x$core_enrichment, collapse ="/")
+            Core_enrichment_immune <- unique(unlist(strsplit(Core_enrichment_immune,"/")))
+            return(Core_enrichment_immune)
+            }
+
+immune_edge_genes <- lapply(GO_immune, get_edge_genes)
+
+immune_edge_genes <- do.call(rbind, lapply(names(immune_edge_genes), function(x){ data.frame(mgi_symbol = immune_edge_genes[[x]], immune_signature = rep(x, length(immune_edge_genes[[x]]))  )}))
+
+immune_edge_genes_excel <- split(immune_edge_genes, immune_edge_genes$immune_signature)
+## write_xlsx(immune_edge_genes_excel, paste(dir.path, "processed data/immune_edge_genes.xlsx", sep = "/")) ##
+
+```
+
+## Create one DF for all DEA comparisions 
+```{r, warning=F, message=F}
+
+DEA_all <- do.call(rbind,
+            lapply(names(DEA), function(x){ 
+              data.frame(DEA[[x]], comparision = rep(x, length(DEA[[x]]$baseMean)))  }))
+
+# meta data curation
+DEA_all$timepoint <- ifelse(grepl("d7",DEA_all$comparision), "day7",ifelse(grepl("d11",DEA_all$comparision),"day11","day16"))
+DEA_all$timepoint <- factor(DEA_all$timepoint, levels =c("day7","day11","day16"))
+DEA_all$Genotype <- ifelse(grepl("WT",DEA_all$comparision), "WT","KO")
+DEA_all$Genotype <- factor(DEA_all$Genotype, levels = c("WT","KO"))
+DEA_all$OVA_delivery <- ifelse(grepl("2BT_OG",DEA_all$comparision), "2BT_OG",
+                               ifelse(grepl("2BT$",DEA_all$comparision), "2BT","OG"))
+DEA_all$Geno_treatment <- paste(DEA_all$Genotype,DEA_all$OVA_delivery, sep = "_")
+DEA_all$Geno_treatment <- factor(DEA_all$Geno_treatment, levels = c("WT_2BT","KO_2BT","KO_OG","WT_OG","WT_2BT_OG","KO_2BT_OG"))
+DEA_all$comparision <- factor(DEA_all$comparision, levels = unique(DEA_all$comparision))
+```
+
+## Differential expressed gene with absolute log2FoldChanges greater 3
+```{r, warning=F, message=F}
+
+
+DEA_lfc3 <- subset(DEA_all, DEA_all$padj < 0.05 & DEA_all$log2FoldChange > 3)
+
+DEA_lfc3$immune_related <- ifelse(DEA_lfc3$mgi_symbol %in% hallmark_inflammatory$gene_symbol,
+                          "Inflammation related gene","not defined DEG")
+
+DEA_lfc3 <- left_join(DEA_lfc3, immune_edge_genes)
+
+## write.table(DEA_lfc3, paste(dir.path,".csv", sep ="/"),sep = ";", row.names = F, dec = "." ) ##
+## write.table(DEA_all,paste(dir.path,".csv", sep ="/"),sep = ";", row.names = F, dec = "."  ) ##
+```
+
+## "immune" edge gene annotation
+```{r, warning=F, message=F}
+DEA_all <- left_join(DEA_all, immune_edge_genes)
+
+DEA_all_tissue <- DEA_all
+DEA_all_tissue$tissue <- rep(tissue, length(DEA_all_tissue$ensembl_gene_id)) 
+
+########### save here for data integration.RMD analysis #########
+##                                                             ##
+## saveRDS(DEA_all_tissue, paste(dir.path,".RData", sep ="/")) ##
+##                                                             ##
+#################################################################
+```
+
+## Edge Gene Table with meta data and DEA information for immune subcategories: partial **Extended Data Table 2** 
+```{r, warning=F, message=F}
+DEA_excel <- DEA_all
+DEA_excel$Genotype <- ifelse(DEA_excel$Genotype == "WT", "Cpa3+/+", "Cpa3Cre/+")
+DEA_excel$OVA_delivery <- ifelse(DEA_excel$OVA_delivery == "OG", "oral_gavage", "2-bottle_test")
+DEA_excel$comparision <- paste(rep("immunized",length(DEA_excel$ensembl_gene_id)),DEA_excel$timepoint, DEA_excel$Genotype, DEA_excel$OVA_delivery, sep = "_" )
+colnames(DEA_excel)[9] <- "tested_sample"
+DEA_excel$reference_sample <- rep("immunized_water_drinking",length(DEA_excel$ensembl_gene_id))
+DEA_excel <- DEA_excel[,c(1:8,15,9,14)]
+
+immune_edge_genes_excel <- split(subset(DEA_excel, !is.na(DEA_excel$immune_signature)),  
+                                 subset(DEA_excel, !is.na(DEA_excel$immune_signature))$immune_signature)
+
+immune_edge_genes_excel  <- lapply(immune_edge_genes_excel, function(x){ x <- x[,c(7,9,3,10)]
+                                                     x <- x[!duplicated(x), ]
+  pivot_wider(x, values_from = "log2FoldChange", names_from = "tested_sample")})
+
+
+
+## write_xlsx(immune_edge_genes_excel, paste(dir.path, ".pdf", sep = "/")) ##
+```
+
+## Edge Gene Table with metadata and DEA information for Hallmark Inflammatory response genes: partial **Extended Data Table 2** 
+```{r, warning=F, message=F}
+hallmark_genes_excel <- subset(DEA_excel, DEA_excel$mgi_symbol %in% hallmark_inflammatory$gene_symbol)
+
+hallmark_genes_excel  <- hallmark_genes_excel[,c(1,3,9,10)]
+hallmark_genes_excel  <- hallmark_genes_excel[!duplicated(hallmark_genes_excel), ]
+hallmark_genes_excel  <- pivot_wider(hallmark_genes_excel, values_from = "log2FoldChange", names_from = "tested_sample")
+
+
+## write_xlsx(hallmark_genes_excel, paste(dir.path, ".pdf", sep = "/")) ##
+## write_xlsx(DEA_excel[,1:10],paste(dir.path,"processed data/DEA_pub_rdy.xlsx", sep ="/")) ##
+```
+
+# Volcano plots
+## partial **Main Text Figure 3**
+```{r, warning=F, message=F}
+volcano_plot <- function(DE.name){
+  
+  DE.plot <- DEA[[DE.name]]
+  
+  DE.plot$color <- ifelse((DE.plot$log2FoldChange > 1.5 | DE.plot$log2FoldChange < -1.5) & DE.plot$padj < 0.05,
+                          DE.plot$log2FoldChange, 0) # color only genes that are significant 
+  
+  ### label annotations
+  # general DE
+  select <- DE.plot[order(abs(DE.plot$log2FoldChange)*-log10(DE.plot$padj) ,decreasing=TRUE),]$mgi_symbol[1:10]
+  
+  DE.plot$label <- ifelse(DE.plot$mgi_symbol %in% select,
+                          DE.plot$mgi_symbol, "") 
+  
+  # immunological GO term genes
+  DE.plot_imm <- subset(DE.plot, DE.plot$mgi_symbol %in% immune_edge_genes$mgi_symbol)
+  
+  select <- DE.plot_imm[order(abs(DE.plot_imm$log2FoldChange)*-log10(DE.plot_imm$padj) ,decreasing=TRUE),]$ensembl_gene_id[1:10]
+  
+  DE.plot$label <- ifelse(DE.plot$ensembl_gene_id %in% select,
+                          DE.plot$mgi_symbol, DE.plot$label)
+  
+  # Mastcell activation
+    DE.plot_Mast <- subset(DE.plot, DE.plot$mgi_symbol %in% Mast_cell_marker)
+  
+  select <- DE.plot_Mast[order(abs(DE.plot_Mast$log2FoldChange)*-log10(DE.plot_Mast$padj) ,decreasing=TRUE),]$ensembl_gene_id[1:10]
+  
+  DE.plot$label <- ifelse(DE.plot$ensembl_gene_id %in% select,
+                          DE.plot$mgi_symbol, DE.plot$label) 
+  
+
+  
+
+  
+  DE.plot$immune_related <- ifelse(DE.plot$mgi_symbol %in% Mast_cell_marker,
+                          "Mast cell activation related gene",
+                          ifelse(DE.plot$mgi_symbol %in% immune_edge_genes$mgi_symbol,
+                          "Immune related gene",
+                          "not defined DEG"))
+  
+  range <- abs(max(DE.plot$log2FoldChange[DE.plot$log2FoldChange != "Inf" | DE.plot$log2FoldChange != "-Inf"]))
+  
+    ggplot(DE.plot) + 
+    geom_vline(xintercept = c(-3,3),linetype = "dashed", color = "grey") +
+    geom_hline(yintercept = -log10(0.05),linetype = "dashed", color = "grey") +
+    geom_point(aes(x = log2FoldChange, y = -log10(padj), color = immune_related, alpha = immune_related)) +
+    geom_text_repel(aes(x = log2FoldChange, y = -log10(padj), label = label, color = immune_related), 
+                    seed = 5, max.time = 2) +  
+    #xlim(c(-range,range)) +
+    #xlim(c(-5,7)) +
+    ylim(c(0,80))+ # ymax = 80 for small intestine, 120 for stomach
+    scale_x_continuous(breaks=c(-4.5,-3,-1.5,0,1.5,3,4.5,6), limits = c(-5,7)) +
+    ggtitle(paste(DE.name)) +
+    theme_minimal() + 
+    scale_alpha_manual(values = c("not defined DEG"=0.35, "Immune related gene"=0.9, 
+                                    "Mast cell activation related gene" =0.9))+
+    scale_color_manual(values = c("not defined DEG"="grey","Immune related gene"= "firebrick", 
+                                   "Mast cell activation related gene" = "steelblue4" )) 
+      
+      
+ 
+    
+} # volcano plot wrapper function
+
+
+## pdf(paste(dir.path, ".pdf", sep = "/"), width = 8, height = 6) ##
+lapply(names(DEA), volcano_plot)
+## dev.off() ##
+
+```
+
+# Boxplots of log2FC immune subgroups and Hallmark Inflammatory response genes
+## absolute log2FC by immune subgroup comparisions with two-sided wilcoxon test
+```{r, warning=F, message=F}
+# plot colors
+comparision_col <- c("WT_2BT" = "#A8A8A7","KO_2BT" = "#FD7D78","KO_OG" = "#c96662","WT_OG" = "#252525")
+
+
+## for lfc plotting get rid off entrez id and ensemble id to remove duplicated rows 
+DEA_all <- DEA_all[,-c(1,8)]
+DEA_all <- DEA_all[!duplicated(DEA_all), ]
+
+# consider only genes with log2FC < -1 or log2FC > 1.5
+LFC_high <- subset(DEA_all, (DEA_all$log2FoldChange < -1 | DEA_all$log2FoldChange > 1.5)) # -0.5 0.75? 
+
+abs_lfc_wilcox <- function(imm_signature, comparision){
+  
+    data <- subset(DEA_all, DEA_all$immune_signature == imm_signature)  
+    
+  if(comparision == "WT"){ comparisionsList <- list(c("d7_WT_2BT","d7_WT_OG"),
+                                                      c("d11_WT_2BT","d11_WT_OG"),
+                                                      c("d16_WT_2BT","d16_WT_OG"),
+                                                      c("d7_WT_2BT","d11_WT_2BT"),
+                                                      c("d7_WT_OG","d11_WT_OG"),
+                                                      c("d11_WT_2BT","d16_WT_2BT"),
+                                                      c("d11_WT_OG","d16_WT_OG"),
+                                                      c("d7_WT_2BT","d16_WT_2BT"),
+                                                      c("d7_WT_OG","d16_WT_OG"))
+    
+    } else {comparisionsList <- list(c("d7_WT_2BT","d7_KO_2BT"),
+                                     c("d11_WT_2BT","d11_KO_2BT"),
+                                     c("d16_WT_2BT","d16_KO_2BT"),
+                                     c("d7_WT_2BT","d11_WT_2BT"),
+                                     c("d11_WT_2BT","d16_WT_2BT"),
+                                     c("d7_WT_2BT","d16_WT_2BT"),
+                                     c("d7_KO_2BT","d11_KO_2BT"),
+                                     c("d7_KO_2BT","d16_KO_2BT"),
+                                     c("d11_KO_2BT","d16_KO_2BT"))
+    }
+    
+    if(comparision == "2BT"){ COMPARISION <- c("KO_2BT","WT_2BT")} else {COMPARISION <- c("WT_2BT","WT_OG")}
+
+  ggplot(subset(data , (data$Geno_treatment %in% COMPARISION) & data$mgi_symbol %in% LFC_high$mgi_symbol),
+       aes(x = comparision, y = abs(log2FoldChange) ,fill = Geno_treatment)) +
+    geom_boxplot(alpha = 0.5,outlier.shape = NA) +
+    geom_quasirandom(size = 0.5, color = "#252525",method = "pseudorandom") +
+    stat_compare_means(method = "wilcox.test", paired = F, 
+                       comparisons = comparisionsList) +
+    scale_fill_manual(values = comparision_col) +
+    scale_color_manual(values = comparision_col) +
+    theme_minimal()+
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+    ggtitle(paste("absolute log2Foldchanges in", imm_signature, "related genes", sep = " " )) 
+
+}
+
+
+```
+
+### partial **Extended Data Figure 5**
+```{r, warning=F}
+#wt only 
+## pdf(paste(dir.path, ".pdf", sep = "/"), width = 6.5, height = 5) ##
+lapply(unique(DEA_all$immune_signature)[-1], abs_lfc_wilcox, "WT")
+## dev.off() ##
+
+```
+
+### partial **Extended Data Figure 6**
+```{r, warning=F}
+#2BT only 
+## pdf(paste(dir.path, ".pdf", sep = "/") , width = 6.5, height = 4) ##
+lapply(unique(DEA_all$immune_signature)[-1], abs_lfc_wilcox, "2BT")
+## dev.off() ##
+```
+
+## geneset (Hallmark Inflammatory, Mast cell activation) and pooled called immune related GO terms
+```{r}
+DEA_all <- DEA_all[,-c(12)]
+DEA_all <- DEA_all[!duplicated(DEA_all), ]
+
+
+abs_lfc_wilcox_gs <- function(gene_set, comparision, gene_set_name){
+  
+    data <- subset(DEA_all, DEA_all$mgi_symbol %in% gene_set)  
+    
+    
+    if(comparision == "all"){ comparisionsList <- list(c("d7_WT_2BT","d7_KO_2BT"),c("d7_WT_OG","d7_KO_OG"),
+                                                      c("d11_WT_2BT","d11_KO_2BT"),c("d11_WT_OG","d11_KO_OG"),
+                                                      c("d16_WT_2BT","d16_KO_2BT"),c("d16_WT_OG","d16_KO_OG"))
+    
+    } else if(comparision == "WT"){ comparisionsList <- list(c("d7_WT_2BT","d7_WT_OG"),
+                                                             c("d11_WT_2BT","d11_WT_OG"),
+                                                             c("d16_WT_2BT","d16_WT_OG"),
+                                                             c("d7_WT_2BT","d11_WT_OG"),
+                                                             c("d7_WT_2BT","d16_WT_OG"),
+                                                             c("d7_WT_OG","d11_WT_OG"),
+                                                             c("d7_WT_OG","d16_WT_OG"))
+    
+    } else {comparisionsList <- list(c("d7_WT_2BT","d7_KO_2BT"),
+                                     c("d11_WT_2BT","d11_KO_2BT"),
+                                     c("d16_WT_2BT","d16_KO_2BT"),
+                                     c("d7_WT_2BT","d11_WT_2BT"),
+                                     c("d7_KO_2BT","d11_KO_2BT"),
+                                     c("d7_WT_2BT","d16_WT_2BT"),
+                                     c("d7_KO_2BT","d16_KO_2BT"))
+    }
+    
+    if(comparision == "all"){ COMPARISION <- c("KO_2BT","WT_2BT","WT_OG","KO_OG")
+    } else if(comparision == "2BT"){ COMPARISION <- c("KO_2BT","WT_2BT")
+    } else {COMPARISION <- c("WT_2BT","WT_OG")}
+    
+    data$label <- ifelse(data$mgi_symbol == "Cpa3", "Cpa3", "")
+
+  ggplot(subset(data , (data$Geno_treatment %in% COMPARISION) & data$mgi_symbol %in% LFC_high$mgi_symbol),
+       aes(x = comparision, y = abs(log2FoldChange) ,fill = Geno_treatment)) +
+    geom_boxplot(alpha = 0.5,outlier.shape = NA) +
+    geom_quasirandom(size = 0.5, color = "#252525",method = "pseudorandom") +
+    #geom_text_repel(aes(label = label),box.padding = 0.5, min.segment.length = 0)+
+    stat_compare_means(method = "wilcox.test", paired = F, 
+                       comparisons = comparisionsList) +
+    scale_fill_manual(values = comparision_col) +
+    scale_color_manual(values = comparision_col) +
+    theme_minimal()+
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) +
+    ggtitle(paste("absolute log2Foldchanges in", gene_set_name, "related genes", sep = " " )) 
+
+}
+```
+
+### partial **Extended Data Figure 5**
+```{r, warning=F}
+### Hallmark Inflammation
+#wt only
+## pdf(paste(dir.path, ".pdf", sep = "/"), width = 6.5, height = 5) ##
+abs_lfc_wilcox_gs(hallmark_inflammatory$gene_symbol, "WT", "Hallmark inflammatory response")
+## dev.off() ##
+```
