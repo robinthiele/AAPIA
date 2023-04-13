@@ -1,5 +1,8 @@
 # Antigen-Avoidance-Prevents-Immune-Activation
-RNA-Seq Analysis - Antigen avoidance prevents Mastcell-mediated immune activation and inflammation
+
+RNA-Seq Analysis - Custom Code - Antigen avoidance prevents Mastcell-mediated immune activation and inflammation
+
+This Repository is a Code availability-Supplement to "Plum, T. et al. Mast cells link immune sensing to antigen avoidance behavior. Nature xxx, xxx-xxx (2023)."
 
 To replicate the the downstream RNA-Seq data analysis, raw countmatrices must be downloaded from the Gene Expresseion Omnibus (SuperSeries ID: GSE225054). Metadata are included in this repository.
 
