@@ -6,6 +6,6 @@ To replicate the the downstream RNA-Seq data analysis, raw countmatrices must be
 
 Analysis is split into two RMarkdown scripts. 
 
-"Tissue_specific_RNA-Seq_Analysis.Rmd" facilitates general DESeq2 differential gene expression analysis starting from raw counts. Further Gene set enrichment analysis via ClusterProfiler is computed and visualized. The script euqally works for the small intestine and stomach dataset (both part of the SuperSeries).
+"Tissue_specific_RNA-Seq_Analysis.Rmd" facilitates general DESeq2 differential gene expression analysis starting from raw counts. Further Gene set enrichment analysis via ClusterProfiler is computed and visualized. The script euqally works for the small intestine and stomach dataset (both part of the GSE225054 SuperSeries).
 
 "Tissue_data_integration.Rmd" integrates both individual datasets by comparing log2FoldChanges of certain genes.
